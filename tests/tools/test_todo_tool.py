@@ -26,11 +26,13 @@ class TestWriteAndRead:
 
     def test_write_deduplicates_duplicate_ids(self):
         store = TodoStore()
-        result = store.write([
-            {"id": "1", "content": "First version", "status": "pending"},
-            {"id": "2", "content": "Other task", "status": "pending"},
-            {"id": "1", "content": "Latest version", "status": "in_progress"},
-        ])
+        result = store.write(
+            [
+                {"id": "1", "content": "First version", "status": "pending"},
+                {"id": "2", "content": "Other task", "status": "pending"},
+                {"id": "1", "content": "Latest version", "status": "in_progress"},
+            ]
+        )
         assert result == [
             {"id": "2", "content": "Other task", "status": "pending"},
             {"id": "1", "content": "Latest version", "status": "in_progress"},
@@ -55,11 +57,13 @@ class TestFormatForInjection:
 
     def test_non_empty_has_markers(self):
         store = TodoStore()
-        store.write([
-            {"id": "1", "content": "Do thing", "status": "completed"},
-            {"id": "2", "content": "Next", "status": "pending"},
-            {"id": "3", "content": "Working", "status": "in_progress"},
-        ])
+        store.write(
+            [
+                {"id": "1", "content": "Do thing", "status": "completed"},
+                {"id": "2", "content": "Next", "status": "pending"},
+                {"id": "3", "content": "Working", "status": "in_progress"},
+            ]
+        )
         text = store.format_for_injection()
         # Completed items are filtered out of injection
         assert "[x]" not in text
@@ -75,9 +79,7 @@ class TestFormatForInjection:
 class TestMergeMode:
     def test_update_existing_by_id(self):
         store = TodoStore()
-        store.write([
-            {"id": "1", "content": "Original", "status": "pending"},
-        ])
+        store.write([{"id": "1", "content": "Original", "status": "pending"}])
         store.write(
             [{"id": "1", "status": "completed"}],
             merge=True,
@@ -108,10 +110,12 @@ class TestTodoToolFunction:
 
     def test_write_mode(self):
         store = TodoStore()
-        result = json.loads(todo_tool(
-            todos=[{"id": "1", "content": "New", "status": "in_progress"}],
-            store=store,
-        ))
+        result = json.loads(
+            todo_tool(
+                todos=[{"id": "1", "content": "New", "status": "in_progress"}],
+                store=store,
+            )
+        )
         assert result["summary"]["in_progress"] == 1
 
     def test_no_store_returns_error(self):
@@ -132,6 +136,7 @@ class TestTodoStoreBounds:
 
     def test_oversized_content_is_truncated(self):
         from tools.todo_tool import MAX_TODO_CONTENT_CHARS
+
         store = TodoStore()
         store.write([{"id": "1", "content": "A" * 50001, "status": "pending"}])
         item = store.read()[0]
@@ -140,6 +145,7 @@ class TestTodoStoreBounds:
 
     def test_injection_block_is_bounded(self):
         from tools.todo_tool import MAX_TODO_CONTENT_CHARS
+
         store = TodoStore()
         store.write([{"id": "1", "content": "A" * 50001, "status": "pending"}])
         inj = store.format_for_injection()
@@ -148,8 +154,9 @@ class TestTodoStoreBounds:
 
     def test_merge_update_content_is_capped(self):
         """The merge path updates content directly, bypassing _validate —
-        verify it is capped too."""
+        _validate — verify it is capped too."""
         from tools.todo_tool import MAX_TODO_CONTENT_CHARS
+
         store = TodoStore()
         store.write([{"id": "1", "content": "short", "status": "pending"}])
         store.write([{"id": "1", "content": "B" * 50001}], merge=True)
@@ -157,21 +164,143 @@ class TestTodoStoreBounds:
 
     def test_item_count_is_bounded(self):
         from tools.todo_tool import MAX_TODO_ITEMS
+
         store = TodoStore()
-        store.write([
-            {"id": str(i), "content": f"task {i}", "status": "pending"}
-            for i in range(5000)
-        ])
+        store.write(
+            [
+                {"id": str(i), "content": f"task {i}", "status": "pending"}
+                for i in range(5000)
+            ]
+        )
         assert len(store.read()) == MAX_TODO_ITEMS
 
     def test_normal_list_is_unchanged(self):
         """No regression: ordinary plans pass through untouched (no marker,
         same content, same order)."""
         store = TodoStore()
-        store.write([
-            {"id": "1", "content": "write the report", "status": "in_progress"},
-            {"id": "2", "content": "review PR", "status": "pending"},
-        ])
+        store.write(
+            [
+                {"id": "1", "content": "write the report", "status": "in_progress"},
+                {"id": "2", "content": "review PR", "status": "pending"},
+            ]
+        )
         items = store.read()
-        assert [i["content"] for i in items] == ["write the report", "review PR"]
+        assert [i["content"] for i in items] == [
+            "write the report",
+            "review PR",
+        ]
         assert "[truncated]" not in items[0]["content"]
+
+
+class TestValidateEmptyContent:
+    def test_validate_raises_value_error_on_empty_content(self):
+        store = TodoStore()
+        try:
+            store.write([{"id": "1", "content": "", "status": "pending"}])
+            assert False, "Expected ValueError"
+        except ValueError as e:
+            assert str(e) == "Todo item content must not be empty"
+
+    def test_validate_raises_value_error_on_whitespace_only_content(self):
+        store = TodoStore()
+        try:
+            store.write([{"id": "1", "content": "   ", "status": "pending"}])
+            assert False, "Expected ValueError"
+        except ValueError as e:
+            assert str(e) == "Todo item content must not be empty"
+
+    def test_validate_raises_value_error_on_missing_content_key(self):
+        store = TodoStore()
+        try:
+            store.write([{"id": "1", "status": "pending"}])
+            assert False, "Expected ValueError"
+        except ValueError as e:
+            assert str(e) == "Todo item content must not be empty"
+
+    def test_todo_tool_returns_error_on_empty_content(self):
+        store = TodoStore()
+        result = json.loads(
+            todo_tool(
+                todos=[{"id": "1", "content": "", "status": "pending"}],
+                store=store,
+            )
+        )
+        assert "error" in result
+        assert "Todo item content must not be empty" in result["error"]
+
+    def test_todo_tool_returns_error_on_whitespace_only_content(self):
+        store = TodoStore()
+        result = json.loads(
+            todo_tool(
+                todos=[{"id": "1", "content": "   ", "status": "pending"}],
+                store=store,
+            )
+        )
+        assert "error" in result
+        assert "Todo item content must not be empty" in result["error"]
+
+    def test_todo_tool_returns_error_on_missing_content_key(self):
+        store = TodoStore()
+        result = json.loads(
+            todo_tool(
+                todos=[{"id": "1", "status": "pending"}],
+                store=store,
+            )
+        )
+        assert "error" in result
+        assert "Todo item content must not be empty" in result["error"]
+
+    def test_merge_mode_new_item_rejection(self):
+        store = TodoStore()
+        store.write([{"id": "1", "content": "Valid", "status": "pending"}])
+        result = json.loads(
+            todo_tool(
+                todos=[{"id": "2", "content": "", "status": "pending"}],
+                merge=True,
+                store=store,
+            )
+        )
+        assert "error" in result
+        # Existing item should still be there
+        items = store.read()
+        assert len(items) == 1
+        assert items[0]["id"] == "1"
+        assert items[0]["content"] == "Valid"
+
+    def test_merge_mode_status_only_update_preserves_content(self):
+        store = TodoStore()
+        store.write([{"id": "1", "content": "Valid", "status": "pending"}])
+        result = json.loads(
+            todo_tool(
+                todos=[{"id": "1", "status": "completed"}],
+                merge=True,
+                store=store,
+            )
+        )
+        assert "error" not in result
+        items = store.read()
+        assert len(items) == 1
+        assert items[0]["id"] == "1"
+        assert items[0]["content"] == "Valid"
+        assert items[0]["status"] == "completed"
+
+    def test_regression_valid_content_still_works(self):
+        store = TodoStore()
+        result = json.loads(
+            todo_tool(
+                todos=[
+                    {"id": "1", "content": "Task 1", "status": "pending"},
+                    {"id": "2", "content": "Task 2", "status": "completed"},
+                ],
+                store=store,
+            )
+        )
+        assert "error" not in result
+        items = store.read()
+        assert len(items) == 2
+        assert items[0]["id"] == "1"
+        assert items[0]["content"] == "Task 1"
+        assert items[0]["status"] == "pending"
+        assert items[1]["id"] == "2"
+        assert items[1]["content"] == "Task 2"
+        assert items[1]["status"] == "completed"

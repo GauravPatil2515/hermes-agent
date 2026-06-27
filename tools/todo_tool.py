@@ -12,6 +12,7 @@ Design:
 - Every call returns the full current list
 - No system prompt mutation, no tool response modification
 - Behavioral guidance lives entirely in the tool schema description
+
 """
 
 import json
@@ -69,7 +70,13 @@ class TodoStore:
                 if item_id in existing:
                     # Update only the fields the LLM actually provided
                     if "content" in t and t["content"]:
-                        existing[item_id]["content"] = self._cap_content(str(t["content"]).strip())
+                        content_val = t["content"]
+                        if isinstance(content_val, str):
+                            stripped = content_val.strip()
+                        else:
+                            stripped = str(content_val).strip()
+                        if stripped:
+                            existing[item_id]["content"] = self._cap_content(stripped)
                     if "status" in t and t["status"]:
                         status = str(t["status"]).strip().lower()
                         if status in VALID_STATUSES:
@@ -122,7 +129,8 @@ class TodoStore:
         }
 
         # Only inject pending/in_progress items — completed/cancelled ones
-        # cause the model to re-do finished work after compression.
+        # cancelled ones cause the model to re-do finished work after
+        # compression.
         active_items = [
             item for item in self._items
             if item["status"] in {"pending", "in_progress"}
@@ -157,6 +165,9 @@ class TodoStore:
 
         Ensures required fields exist and status is valid.
         Returns a clean dict with only {id, content, status}.
+
+        Raises:
+            ValueError: If content is empty or missing (after stripping whitespace).
         """
         item_id = str(item.get("id", "")).strip()
         if not item_id:
@@ -164,9 +175,9 @@ class TodoStore:
 
         content = str(item.get("content", "")).strip()
         if not content:
-            content = "(no description)"
-        else:
-            content = TodoStore._cap_content(content)
+            raise ValueError("Todo item content must not be empty")
+
+        content = TodoStore._cap_content(content)
 
         status = str(item.get("status", "pending")).strip().lower()
         if status not in VALID_STATUSES:
@@ -203,10 +214,13 @@ def todo_tool(
     if store is None:
         return tool_error("TodoStore not initialized")
 
-    if todos is not None:
-        items = store.write(todos, merge)
-    else:
-        items = store.read()
+    try:
+        if todos is not None:
+            items = store.write(todos, merge)
+        else:
+            items = store.read()
+    except ValueError as e:
+        return tool_error(str(e))
 
     # Build summary counts
     pending = sum(1 for i in items if i["status"] == "pending")
@@ -302,7 +316,8 @@ registry.register(
     toolset="todo",
     schema=TODO_SCHEMA,
     handler=lambda args, **kw: todo_tool(
-        todos=args.get("todos"), merge=args.get("merge", False), store=kw.get("store")),
+        todos=args.get("todos"), merge=args.get("merge", False), store=kw.get("store")
+    ),
     check_fn=check_todo_requirements,
     emoji="📋",
 )
