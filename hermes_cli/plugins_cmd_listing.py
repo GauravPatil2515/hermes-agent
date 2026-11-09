@@ -83,6 +83,7 @@ def cmd_list(args: Any | None = None) -> None:
         (("Name", "bold"), ("Status", None), ("Version", "dim"), ("Description", None), ("Source", "dim")),
         title="Plugins", show_lines=False)
     # provenance class per user-installed dir (bundled entries show '-')
+    from rich.markup import escape
     from hermes_cli.plugins_provenance import plugins_provenance
 
     prov_classes = {
@@ -96,7 +97,7 @@ def cmd_list(args: Any | None = None) -> None:
         if removed:
             name = f"[red]{name} ✗[/red]"
             removed_lines.append(f"[red]✗ {name}[/red] was removed from the plugin catalog: {removed}")
-        table.add_row(name, status, version, description, source)
+        table.add_row(name, status, version, escape(description or ""), source)
         # class line rides the Source column for user plugins
         if source in {"user", "git"}:
             if klass and klass != "git":
@@ -130,7 +131,7 @@ def cmd_show(name: str) -> None:
     console.print()
     console.print(f"[bold]{pname}[/bold]" + (f" [dim]v{version}[/dim]" if version else ""))
     if description:
-        console.print(description)
+        console.print(description, markup=False)
     console.print(f"[dim]Status:[/dim] {status}")
     console.print(f"[dim]Source:[/dim] {source}")
     console.print(f"[dim]Key:[/dim] {key}")

@@ -699,3 +699,42 @@ def test_brief_install_prints_the_pin_and_outcome_and_a_restart_hint_only_for_a_
     assert not any(isinstance(p, Panel) for p in printed)
     assert "maintained by" not in text and "Cloning" not in text
     assert ("Restart the gateway" in text) is bool(gateway_pid)
+
+
+def test_bracketed_descriptions_preserved_without_markup_stripping(world, monkeypatch):
+    """#151743: plugin descriptions containing bracketed text (e.g. [sigh], [whisper], [index])
+    must print verbatim and not be stripped as Rich markup."""
+    from rich.console import Console
+    from hermes_cli import plugins_cmd_install as pc_inst
+    bracket_desc = "a small bracket score such as [sigh], [whisper: it passed.], [pause] or [warm, amused]"
+    entry = pc_cat.PluginCatalogEntry(
+        name="emotion-chip", repo=world["repo"].as_uri(), sha=world["sha1"],
+        description=bracket_desc, maintainer="t", category="tools", tier="community"
+    )
+    monkeypatch.setattr(cat, "load_catalog_live", lambda: [entry])
+    monkeypatch.setattr(cat, "get_live_catalog_entry", lambda name: entry if name == "emotion-chip" else None)
+
+    # 1. Search table rendering
+    console = Console(record=True, width=120)
+    monkeypatch.setattr(pc, "_console", lambda: console)
+    cat.cmd_search("emotion-chip")
+    output = console.export_text()
+    assert "[sigh]" in output
+    assert "[whisper: it" in output
+
+    # 2. cmd_info rendering
+    console = Console(record=True, width=120)
+    monkeypatch.setattr(pc, "_console", lambda: console)
+    cat.cmd_info("emotion-chip")
+    info_output = console.export_text()
+    assert bracket_desc in info_output
+
+    # 3. _announce_source (install prompt) rendering
+    console = Console(record=True, width=120)
+    monkeypatch.setattr(cat, "resolve_catalog_name", lambda *a, **k: entry)
+    pc_inst._announce_source("emotion-chip", console, brief=False)
+    announce_output = console.export_text()
+    assert "[sigh]" in announce_output
+    assert "[pause]" in announce_output
+
+

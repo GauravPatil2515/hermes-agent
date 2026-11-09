@@ -805,6 +805,7 @@ def pin_label(entry: PluginCatalogEntry) -> str:
 
 
 def _render_entries(entries: list[PluginCatalogEntry], console) -> None:
+    from rich.markup import escape
     from hermes_cli.plugins_cmd import _table
     table = _table(((("Name", "bold")), ("Category", None), ("Tier", None), ("Description", None),
                     ("Pinned", "dim"), ("Capabilities", "dim")), title="Hermes Plugin Catalog (curated)")
@@ -812,7 +813,7 @@ def _render_entries(entries: list[PluginCatalogEntry], console) -> None:
     style = {"official": "cyan", "verified": "green", "community": "magenta"}
     for e in sorted(entries, key=lambda e: (e.category, rank.get(e.tier, len(rank)), e.name)):
         tier = f"[{style.get(e.tier, 'magenta')}]{e.tier}[/{style.get(e.tier, 'magenta')}]"
-        desc = e.description if len(e.description) <= 60 else e.description[:57] + "..."
+        desc = escape(e.description if len(e.description) <= 60 else e.description[:57] + "...")
         name = e.name + (f"\n[yellow]needs Hermes {e.requires_hermes}[/yellow]" if catalog_hermes_error(e) else "")
         table.add_row(name, e.category, tier, desc, pin_label(e), _capability_counts(e))
     console.print()
@@ -849,7 +850,7 @@ def cmd_info(name: str) -> None:
     console.print()
     console.print(f"[bold]{entry.name}[/bold] [cyan]\\[{entry.tier}][/cyan]")
     if entry.description:
-        console.print(entry.description)
+        console.print(entry.description, markup=False)
     console.print()
     rows = [("Repo", entry.repo), ("Subdir", entry.subdir), ("Version", entry.version), ("Pinned SHA", entry.sha),
             ("Image", entry.image),

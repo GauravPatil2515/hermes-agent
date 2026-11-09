@@ -269,13 +269,14 @@ def resolve_pack_plugins(pack: PluginPack) -> list[ResolvedPackPlugin]:
 
 def render_pack_review(console, pack: PluginPack, resolved: list[ResolvedPackPlugin]) -> None:
     """Print the full pack review screen (mandatory before install)."""
+    from rich.markup import escape
     from rich.table import Table
     header = f"[bold]{pack.name}[/bold]" + (f" v{pack.version}" if pack.version else "")
     if pack.author:
         header += f" — by {pack.author}"
     console.print(f"\n{header}")
     if pack.description:
-        console.print(f"[dim]{pack.description}[/dim]")
+        console.print(f"[dim]{escape(pack.description)}[/dim]")
 
     table = Table(show_header=True, header_style="bold")
     table.add_column("Plugin")

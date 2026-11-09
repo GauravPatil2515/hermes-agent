@@ -183,3 +183,32 @@ def test_unreadable_plugin_dir_is_skipped_by_every_manifest_scan(monkeypatch, tm
     assert loader_names == ["good"]
     assert listed_names == ["good"]
     assert caplog.text.count("Skipping unreadable plugin directory") == 2
+
+
+def test_cmd_list_and_cmd_show_preserve_bracketed_descriptions(monkeypatch):
+    """#151743: bracketed text like [sigh] or items[index] in plugin descriptions must not be stripped as Rich markup."""
+    from rich.console import Console
+    bracket_desc = "a small bracket score such as [sigh], [whisper: it passed.], [pause] or [warm, amused]"
+    entries = [
+        ("bracket-plugin", "1.0.0", bracket_desc, "user", None, "bracket-plugin"),
+    ]
+    monkeypatch.setattr(plugins_cmd, "_discover_all_plugins", lambda: entries)
+    monkeypatch.setattr(plugins_cmd, "_get_enabled_set", lambda: set())
+    monkeypatch.setattr(plugins_cmd, "_get_disabled_set", lambda: set())
+    monkeypatch.setattr(plugins_cmd, "_find_plugin_entry", lambda name: ("bracket-plugin", "1.0.0", bracket_desc, "user", None, "bracket-plugin"))
+
+    # test cmd_list
+    console = Console(record=True, width=120)
+    monkeypatch.setattr(plugins_cmd, "_console", lambda: console)
+    plugins_cmd.cmd_list(_args())
+    list_out = console.export_text()
+    assert "[sigh]" in list_out
+    assert "[whisper: it passed.]" in list_out
+
+    # test cmd_show
+    console = Console(record=True, width=120)
+    monkeypatch.setattr(plugins_cmd, "_console", lambda: console)
+    plugins_cmd.cmd_show("bracket-plugin")
+    show_out = console.export_text()
+    assert bracket_desc in show_out
+

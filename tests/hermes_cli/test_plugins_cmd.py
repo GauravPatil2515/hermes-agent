@@ -558,6 +558,32 @@ class TestPromptPluginEnvVars:
         printed = " ".join(str(c) for c in console.print.call_args_list)
         assert "langfuse.com" in printed
 
+    def test_bracketed_env_var_description_preserved(self):
+        from hermes_cli.plugins_cmd import _prompt_plugin_env_vars
+        from unittest.mock import MagicMock, patch
+        from rich.console import Console
+
+        console = Console(record=True, width=120)
+        bracket_desc = "API token for [optional] access to [sandbox] service"
+        manifest = {
+            "name": "test-env-plugin",
+            "requires_env": [
+                {
+                    "name": "TEST_VAR",
+                    "description": bracket_desc,
+                    "secret": False,
+                },
+            ],
+        }
+
+        with patch("hermes_cli.config.get_env_value", return_value=None), \
+             patch("builtins.input", return_value="val"), \
+             patch("hermes_cli.config.save_env_value"):
+            _prompt_plugin_env_vars(manifest, console)
+
+        output = console.export_text()
+        assert bracket_desc in output
+
     def test_secret_uses_masked_prompt(self):
         from hermes_cli.plugins_cmd import _prompt_plugin_env_vars
         from unittest.mock import MagicMock, patch

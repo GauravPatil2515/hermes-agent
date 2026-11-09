@@ -185,7 +185,7 @@ def _prompt_plugin_env_vars(manifest: dict, console) -> None:
         name = spec["name"]
         desc = spec.get("description", "")
         url = spec.get("url", "")
-        console.print(f"  {name}" + (f" — {desc}" if desc else ""))
+        console.print(f"  {name}" + (f" — {desc}" if desc else ""), markup=False)
         if url:
             console.print(f"  [dim]Get yours at: {url}[/dim]")
         try:
@@ -609,7 +609,7 @@ def _announce_source(identifier: str, console, *, brief: bool) -> tuple[Optional
     entry = catalog.resolve_catalog_name(identifier, console)
     console.print(f"[bold]{entry.name}[/bold] [cyan]\\[{entry.tier}][/cyan] [dim]pinned @ {entry.sha[:8]}[/dim]")
     if not brief:
-        console.print(catalog.entry_capability_summary(entry))
+        console.print(catalog.entry_capability_summary(entry), markup=False)
     return entry, entry.install_identifier
 
 
