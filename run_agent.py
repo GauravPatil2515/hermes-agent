@@ -1366,6 +1366,9 @@ class AIAgent(
             goal=function_args.get("goal"), context=function_args.get("context"),
             tasks=_strip_model_hidden_task_fields(function_args.get("tasks")),
             max_iterations=function_args.get("max_iterations"), role=function_args.get("role"),
+            # A session whose pinned schema predates the per-task parameter sends it top-level: honor it instead of
+            # dropping it and routing the task on the parent's model.
+            profile=function_args.get("profile"),
             background=not (getattr(self, "_delegate_depth", 0) > 0), images=function_args.get("images"),
             action=function_args.get("action"),
             subagent_id=function_args.get("subagent_id"), message=function_args.get("message"), parent_agent=self,

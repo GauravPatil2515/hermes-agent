@@ -605,13 +605,14 @@ def delegate_task(
     goal: Optional[str] = None, context: Optional[str] = None, tasks: Optional[list[dict[str, Any]]] = None,
     max_iterations: Optional[int] = None, role: Optional[str] = None, background: Optional[bool] = None,
     output_schema: Optional[dict[str, Any]] = None, images: Optional[list[str]] = None, action: Optional[str] = None,
-    subagent_id: Optional[str] = None, message: Optional[str] = None, parent_agent=None,
-    credentials_cfg: Optional[dict[str, Any]] = None,
+    subagent_id: Optional[str] = None, message: Optional[str] = None, profile: Optional[str] = None,
+    parent_agent=None, credentials_cfg: Optional[dict[str, Any]] = None,
 ) -> str:
     """Spawn child agents (single ``goal`` or ``tasks=[...]`` batch) or control running ones. ``action``
     list/steer/stop run synchronously and bypass the pause gate, depth limit and async dispatch. ``role`` is legacy
-    (per-task beats top-level; capability is depth-derived). Returns JSON with one results entry per task, or a
-    dispatch handle when running in the background."""
+    (per-task beats top-level; capability is depth-derived). A top-level ``profile`` applies to every task that sets
+    none of its own. Returns JSON with one results entry per task, or a dispatch handle when running in the
+    background."""
     if parent_agent is None:
         return tool_error("delegate_task requires a parent agent context.")
     from tools.hosted_tool_policy import host_feature_refusal
@@ -658,7 +659,7 @@ def delegate_task(
             max_iterations, default_max_iter,
         )
     max_children = _get_max_concurrent_children()
-    task_list, err = _normalize_task_list(goal, context, tasks, output_schema, top_role, max_children)
+    task_list, err = _normalize_task_list(goal, context, tasks, output_schema, top_role, max_children, profile)
     if not err:
         task_schemas, err = _coerce_task_schemas(task_list, output_schema)
     if not err:
@@ -993,7 +994,7 @@ registry.register(
     schema=DELEGATE_TASK_SCHEMA,
     handler=lambda args, **kw: delegate_task(
         goal=args.get("goal"), context=args.get("context"), tasks=_strip_model_hidden_task_fields(args.get("tasks")),
-        max_iterations=args.get("max_iterations"), role=args.get("role"),
+        max_iterations=args.get("max_iterations"), role=args.get("role"), profile=args.get("profile"),
         background=_model_background_value(args, kw.get("parent_agent")), output_schema=args.get("output_schema"),
         images=args.get("images"), action=args.get("action"), subagent_id=args.get("subagent_id"), message=args.get("message"),
         parent_agent=kw.get("parent_agent"),

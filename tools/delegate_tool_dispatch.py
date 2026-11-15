@@ -465,6 +465,7 @@ def _dispatch_unit(unit: _Batch, unit_id: Optional[str], slot_key: Optional[str]
         task_transcripts={str(i): str(unit.live_writers[i].path) for i, _, _ in unit.children
                           if i < len(unit.live_writers) and unit.live_writers[i] is not None
                           and unit.live_writers[i].path is not None},
+        profiles=[t.get("profile") for t in unit.task_list],
         progress_fn=lambda: _batch_progress_token(child_agents), **routing,
     )
 

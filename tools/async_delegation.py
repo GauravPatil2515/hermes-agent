@@ -225,6 +225,8 @@ def _persist_dispatch(record: dict[str, Any]) -> None:
         key: record.get(key)
         for key in ("goal", "goals", "context", "toolsets", "role", "model", "is_batch", "task_indexes", "task_transcripts", *_ROUTING_KEYS)
         if key in record}
+    if record.get("profiles"):
+        task_payload["profiles"] = list(record["profiles"])
     try:  # where the children's terminals started; lets recovery add a git-state hint
         task_payload["owner_cwd"] = os.getcwd()
     except OSError:
@@ -990,13 +992,14 @@ def _dispatch_admitted(
     progress_fn: Optional[Callable[[], tuple]], capacity_error: str, slot_key: Optional[str] = None,
     task_indexes: Optional[list[int]] = None,
     task_transcripts: Optional[dict[str, str]] = None,
+    profiles: Optional[list[Optional[str]]] = None,
 ) -> dict[str, Any]:
     """Shared dispatch core for single (``goals is None``) and batch units. Capacity check +
     record insert happen under ONE lock hold so concurrent dispatches can't both pass the check
     and exceed the cap. At capacity the dispatch is REJECTED (never queued) so a runaway model
     can't pile up unbounded background work. ``slot_key`` names the pool slot the unit occupies
     (default: its own id); the units of one delegate_task call share the first unit's id so
-    splitting a call into per-group completions never consumes more capacity than the call did."""
+    splitting a call into per-group completions never changes capacity accounting than the call did."""
     worker_ledger()  # refuse unbound workers before publishing a live record
     is_batch = goals is not None
     label = " batch" if is_batch else ""
@@ -1013,6 +1016,8 @@ def _dispatch_admitted(
         "interrupt_fn": interrupt_fn, **({"is_batch": True} if is_batch else {}), "progress_fn": progress_fn,
         "slot_key": slot_key or delegation_id,
         **({"task_transcripts": dict(task_transcripts)} if task_transcripts else {}),
+        # Requested profile per goal (None = the parent's own route): recovery and the record show what was asked.
+        **({"profiles": list(profiles)} if profiles and any(profiles) else {}),
         # Which of the call's ``goals`` this unit runs (None = all of them).
         **({"task_indexes": list(task_indexes)} if task_indexes is not None else {}),
         # The one stale-monitor thread serves every profile and starts with an empty Context;
@@ -1124,6 +1129,7 @@ def dispatch_async_delegation_batch(
     progress_fn: Optional[Callable[[], tuple]] = None, slot_key: Optional[str] = None,
     task_indexes: Optional[list[int]] = None,
     task_transcripts: Optional[dict[str, str]] = None,
+    profiles: Optional[list[Optional[str]]] = None,
 ) -> dict[str, Any]:
     """Dispatch a fan-out unit (a whole batch, or one ``group`` of a delegate_task call) as ONE
     background unit: ``runner`` runs its tasks and returns the combined ``{"results": [...],
@@ -1141,7 +1147,7 @@ def dispatch_async_delegation_batch(
         parent_session_id=parent_session_id, runner=runner,
         origin_ui_session_id=origin_ui_session_id, origin_session_id=origin_session_id,
         interrupt_fn=interrupt_fn, max_async_children=max_async_children, progress_fn=progress_fn, slot_key=slot_key,
-        task_indexes=task_indexes, task_transcripts=task_transcripts,
+        task_indexes=task_indexes, task_transcripts=task_transcripts, profiles=profiles,
         capacity_error=(
             f"Async delegation capacity reached ({max_async_children} running). Wait for one to finish "
             "(its result will re-enter the chat), or raise delegation.max_concurrent_children in "

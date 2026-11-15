@@ -42,10 +42,14 @@ def _reserve_child_transcript(child: Any) -> None:
         # the moment its id is published. The first turn merges the rest of the
         # constructor config in (``AIAgent._ensure_db_session``); the prompt stays unset.
         parent_sid = child._parent_session_id
+        # The route's profile is stamped here because this is the row's first insert: the store derives
+        # the owner from its db_path (the PARENT's state.db), which would label a profile child "default".
+        profile_home = getattr(child, "_delegate_profile_home", None)
         db.create_session(
             session_id=child.session_id, source="subagent",
             parent_session_id=parent_sid,
             model_config={"_delegate_from": parent_sid} if parent_sid else None,
+            profile_name=os.path.basename(str(profile_home)) if profile_home else None,
         )
         child._session_db_reserved = True
     except BaseException:

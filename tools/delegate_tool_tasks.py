@@ -65,9 +65,10 @@ def _validate_batch_tasks(task_list: list[dict[str, Any]]) -> Optional[str]:
     return None
 
 def _normalize_task_list(
-    goal, context, tasks, output_schema, top_role: str, max_children: int
+    goal, context, tasks, output_schema, top_role: str, max_children: int, profile: Optional[str] = None
 ) -> tuple[Optional[list[dict[str, Any]]], Optional[str]]:
-    """``(task_list, None)`` from ``tasks=[...]`` or the legacy single ``goal``, else ``(None, error)``."""
+    """``(task_list, None)`` from ``tasks=[...]`` or the legacy single ``goal``, else ``(None, error)``.
+    A top-level ``profile`` is the default for every task that sets none of its own."""
     recovered_tasks, tasks_error = _recover_tasks_from_json_string(tasks)
     if tasks_error:
         return None, tasks_error
@@ -100,6 +101,12 @@ def _normalize_task_list(
             return None, f"Task {i} must be an object, got {type(task).__name__}."
         if not task.get("goal", "").strip():
             return None, f"Task {i} is missing a 'goal'."
+    if profile is not None:
+        if not isinstance(profile, str) or not profile.strip():
+            return None, "'profile' must be a profile name (see the tool's `profile` choices)."
+        profile = profile.strip()
+        # A task's own profile is more specific; copies keep the caller's dicts untouched.
+        task_list = [{**t, "profile": profile} if not t.get("profile") else t for t in task_list]
     # The single-goal form is exempt from the batch gate (short goals are valid there).
     batch_error = _validate_batch_tasks(task_list) if isinstance(tasks, list) else None
     return (None, batch_error) if batch_error else (task_list, None)
