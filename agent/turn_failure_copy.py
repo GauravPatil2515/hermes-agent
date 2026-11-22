@@ -459,14 +459,36 @@ def limit_reset_copy(resets_at: float, now: Optional[float] = None) -> str:
     return f"Limit resets at {time.strftime('%H:%M', time.localtime(resets_at))} (in {wait})."
 
 
-def oauth_relogin_command(provider: Any) -> str:
+# Pool sources whose grant another CLI owns: Hermes only adopts (and refreshes) that CLI's login, so
+# `hermes auth add` mints a second credential instead of fixing the rejected one. The command is the
+# owning CLI's own sign-in; its credential store is per OS user, so no Hermes profile selector applies.
+_EXTERNAL_SOURCE_RELOGIN: dict[str, str] = {
+    "claude_code": "claude auth login",  # Claude Code CLI; `/login` inside a `claude` session is equivalent
+}
+
+
+def _external_source_relogin(slug: str, pool: Any = None) -> str:
+    """The owning CLI's sign-in when ``slug``'s active credential was adopted from it, else ""."""
+    try:
+        from agent.error_surface import active_credential
+
+        active = active_credential(slug, pool)
+        return _EXTERNAL_SOURCE_RELOGIN.get(active[0], "") if active is not None else ""
+    except Exception:  # pragma: no cover — advisory only
+        return ""
+
+
+def oauth_relogin_command(provider: Any, pool: Any = None) -> str:
     """The exact re-login command for a rejected OAuth grant, naming the provider slug and the active
     named profile: a profile's credentials are its own (93889b770da), so a bare ``hermes auth`` from
     the root profile re-signs the wrong store and the goal judge, reading a bare 401, guesses which
-    service revoked the token (#114012)."""
+    service revoked the token (#114012). A grant adopted from another CLI (Claude Code's login)
+    names that CLI's sign-in instead (``_EXTERNAL_SOURCE_RELOGIN``)."""
     from hermes_constants import profile_cli_selector
 
     slug = str(provider or "").strip().lower()
+    if external := _external_source_relogin(slug, pool):
+        return external
     if slug == "nous":
         return f"hermes {profile_cli_selector()}portal"
     if _login_owned_by_external_cli(slug):
@@ -514,11 +536,12 @@ def _login_owned_by_external_cli(slug: str) -> bool:
     return getattr(plugin_profile(slug), "auth_type", "") == "external_process" and plugin_auth_handler(slug) is None
 
 
-def relogin_command_hint(provider: Any) -> str:
+def relogin_command_hint(provider: Any, pool: Any = None) -> str:
     """Re-sign-in command for a rejected credential on surfaces that may not know the provider:
-    the exact OAuth command for a known OAuth slug, ``hermes auth add <slug>`` for a known API-key
-    slug, and the ``<provider>`` placeholder when the slug is unknown — always carrying the
-    ``-p <profile>`` selector so a profile user never re-signs the ROOT store (#114012)."""
+    the exact OAuth command for a known OAuth slug or an OAuth credential in use, ``hermes auth add
+    <slug>`` for a known API-key slug, and the ``<provider>`` placeholder when the slug is unknown —
+    always carrying the ``-p <profile>`` selector so a profile user never re-signs the ROOT store
+    (#114012)."""
     from hermes_constants import profile_cli_selector
 
     slug = str(provider or "").strip().lower()
@@ -526,20 +549,24 @@ def relogin_command_hint(provider: Any) -> str:
         return f"hermes {profile_cli_selector()}auth add <provider>"
     from agent.error_surface import auth_kind
 
-    if _login_owned_by_external_cli(slug) or auth_kind(slug) == "oauth":
-        return oauth_relogin_command(slug)
+    if _login_owned_by_external_cli(slug) or auth_kind(slug, pool) == "oauth":
+        return oauth_relogin_command(slug, pool)
     return f"hermes {profile_cli_selector()}auth add {slug}"
 
 
 def nonretryable_copy(
     classified: Any, *, provider: Any, model: Any, summary: str, prefix_suggestion: Optional[str] = None,
+    pool: Any = None,
 ) -> str:
-    """Chat copy for a terminal non-retryable rejection (auth, model missing, TLS, generic 4xx)."""
+    """Chat copy for a terminal non-retryable rejection (auth, model missing, TLS, generic 4xx).
+
+    ``pool`` is the agent's credential pool, so the auth copy follows the credential that was
+    rejected (an OAuth login adopted from Claude Code) rather than the provider's catalog kind."""
     label = provider_label_for(provider)
     if getattr(classified, "is_auth", False):
         from agent.error_surface import auth_kind
 
-        template = _AUTH_COPY[auth_kind(str(provider or ""))]
+        template = _AUTH_COPY[auth_kind(str(provider or ""), pool)]
     else:
         template = _NONRETRYABLE_COPY.get(classified.reason.value, _NONRETRYABLE_DEFAULT_COPY)
     prefix_hint = (
@@ -547,7 +574,7 @@ def nonretryable_copy(
         f"'{prefix_suggestion}'?"
         if prefix_suggestion else ""
     )
-    relogin = oauth_relogin_command(provider) if "{relogin}" in template else ""
+    relogin = oauth_relogin_command(provider, pool) if "{relogin}" in template else ""
     body = template.format(label=label, model=model, home=display_hermes_home(), prefix_hint=prefix_hint,
                            relogin=relogin)
     return f"{body}\n\nProvider said: {summary}"

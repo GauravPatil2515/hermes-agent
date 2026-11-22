@@ -126,9 +126,42 @@ def _provider_label(provider: str) -> str:
         return provider
 
 
-def auth_kind(provider: Optional[str]) -> str:
-    """``"oauth"`` for providers whose credential is an OAuth/subscription grant
-    (desktop Accounts tab), ``"api_key"`` for everything else."""
+def active_credential(provider: Optional[str], pool: Any = None) -> Optional[tuple[str, str]]:
+    """``(source, auth_type)`` of the pooled credential ``provider`` is using, or None.
+
+    ``pool`` is the running agent's ``CredentialPool`` when the caller has one: its current entry
+    is the credential the provider just rejected. Without it, the persisted pool is read
+    side-effect free (no seeding, no persist) and the highest-priority row stands in for the
+    active one. Advisory only: any failure returns None and callers keep the catalog answer."""
+    slug = (provider or "").strip().lower()
+    if not slug:
+        return None
+    try:
+        if pool is not None and str(getattr(pool, "provider", "") or "").strip().lower() == slug:
+            current = pool.current() if callable(getattr(pool, "current", None)) else None
+            if current is not None and isinstance(getattr(current, "source", None), str):
+                return str(current.source or ""), str(getattr(current, "auth_type", "") or "")
+        from agent.credential_pool import PooledCredential
+        from hermes_cli.auth import read_credential_pool
+
+        rows = [PooledCredential.from_dict(slug, row) for row in read_credential_pool(slug) if isinstance(row, dict)]
+        if not rows:
+            return None
+        top = min(rows, key=lambda entry: entry.priority if isinstance(entry.priority, int) else 0)
+        return str(top.source or ""), str(top.auth_type or "")
+    except Exception:  # pragma: no cover — advisory only
+        logger.debug("error_surface: active credential lookup failed", exc_info=True)
+        return None
+
+
+def auth_kind(provider: Optional[str], pool: Any = None) -> str:
+    """``"oauth"`` when the credential in use is an OAuth grant (an Anthropic subscription login
+    adopted from Claude Code, say) or the provider's credential is one by catalog (desktop
+    Accounts tab), ``"api_key"`` for everything else. An ``api_key`` row never downgrades a
+    catalog OAuth provider: some sign-in flows store their token as a key."""
+    active = active_credential(provider, pool)
+    if active is not None and active[1] == "oauth":
+        return "oauth"
     try:
         from hermes_cli.provider_catalog import provider_catalog_by_slug
 

@@ -1174,7 +1174,7 @@ def nonretryable_client_error_result(
         # Every surface reads final_response; the CLI hint lines above never reach chat.
         _final_response = nonretryable_copy(
             classified, provider=provider, model=model, summary=_nonretryable_summary,
-            prefix_suggestion=_prefix_suggestion,
+            prefix_suggestion=_prefix_suggestion, pool=getattr(agent, "_credential_pool", None),
         )
     # Same verdict fields as the max-retries path: without them the UI descriptor
     # (agent/error_surface.py) reads a rejected OAuth token as a retryable

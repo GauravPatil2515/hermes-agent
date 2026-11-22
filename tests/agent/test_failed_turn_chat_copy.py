@@ -223,3 +223,107 @@ def test_model_caused_codes_stay_on_the_provider_layer_and_runtime_codes_on_gate
               for c in ("truncated", "empty_response", "invalid_response", "session_busy", "loop_error")}
     assert layers["truncated"] == layers["empty_response"] == layers["invalid_response"] == LAYER_PROVIDER
     assert layers["session_busy"] == layers["loop_error"] == LAYER_GATEWAY
+
+
+# ---- auth copy follows the credential in use, not the provider catalog ----------------------
+
+_ANTHROPIC_OAUTH_401 = (
+    "HTTP 401: {'type': 'error', 'error': {'type': 'authentication_error', "
+    "'message': 'OAuth access token is invalid'}}"
+)
+
+
+class _Pool:
+    """Stand-in for the agent's ``CredentialPool``: only ``provider`` and ``current()`` are read."""
+
+    def __init__(self, provider, source, auth_type):
+        self.provider = provider
+        self._current = SimpleNamespace(source=source, auth_type=auth_type)
+
+    def current(self):
+        return self._current
+
+
+def _stored_rows(monkeypatch, rows):
+    import hermes_cli.auth as auth_mod
+
+    monkeypatch.setattr(auth_mod, "read_credential_pool", lambda provider_id=None: list(rows))
+
+
+def test_anthropic_claude_code_oauth_401_names_claude_auth_login_not_hermes_setup(monkeypatch):
+    """An Anthropic pool whose credential is Claude Code's adopted login: `hermes setup` and
+    `hermes auth add` do not refresh that grant, `claude auth login` does."""
+    _stored_rows(monkeypatch, [])
+
+    class _AnthropicAgent(_Agent):
+        provider = "anthropic"
+        _credential_pool = _Pool("anthropic", "claude_code", "oauth")
+
+    result = _nonretryable(401, _ANTHROPIC_OAUTH_401, provider="anthropic", model="claude-opus-4-6",
+                           agent=_AnthropicAgent())
+    text = result["final_response"]
+    assert "`claude auth login`" in text, text
+    assert "API key" not in text and "hermes setup" not in text, text
+    assert "OAuth access token is invalid" in text  # the raw error survives
+    assert result["failure_reason"] in ("auth", "auth_permanent")
+
+
+def test_persisted_claude_code_row_drives_copy_when_no_agent_pool(monkeypatch):
+    """Surfaces without the agent (cron, gateway hint) read the persisted pool side-effect free."""
+    from agent.error_surface import auth_kind
+    from agent.turn_failure_copy import oauth_relogin_command, relogin_command_hint
+
+    _stored_rows(monkeypatch, [
+        {"id": "b", "source": "hermes_pkce", "auth_type": "oauth", "priority": 1, "access_token": "x"},
+        {"id": "a", "source": "claude_code", "auth_type": "oauth", "priority": 0, "access_token": "y"},
+    ])
+    assert auth_kind("anthropic") == "oauth"
+    assert oauth_relogin_command("anthropic") == "claude auth login"
+    assert relogin_command_hint("anthropic") == "claude auth login"
+
+
+def test_hermes_owned_oauth_row_keeps_the_profile_scoped_hermes_command(tmp_path, monkeypatch):
+    from agent.turn_failure_copy import relogin_command_hint
+
+    profile_home = tmp_path / ".hermes" / "profiles" / "work"
+    profile_home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_HOME", str(profile_home))
+    _stored_rows(monkeypatch, [
+        {"id": "a", "source": "hermes_pkce", "auth_type": "oauth", "priority": 0, "access_token": "y"},
+    ])
+    assert relogin_command_hint("anthropic") == "hermes -p work auth add anthropic --type oauth"
+
+
+def test_api_key_credential_and_unreadable_pool_keep_the_catalog_copy(monkeypatch):
+    """An API-key row, an empty pool and a failing lookup all fall back to the catalog answer."""
+    import hermes_cli.auth as auth_mod
+    from agent.error_surface import auth_kind
+    from agent.turn_failure_copy import relogin_command_hint
+
+    class _AnthropicKeyAgent(_Agent):
+        provider = "anthropic"
+        _credential_pool = _Pool("anthropic", "env:ANTHROPIC_API_KEY", "api_key")
+
+    _stored_rows(monkeypatch, [])
+    text = _nonretryable(401, "HTTP 401: invalid x-api-key", provider="anthropic", model="claude-opus-4-6",
+                         agent=_AnthropicKeyAgent())["final_response"]
+    assert "rejected your API key" in text and "claude auth login" not in text
+    assert relogin_command_hint("anthropic") == "hermes auth add anthropic"
+
+    def _boom(provider_id=None):
+        raise RuntimeError("auth store unreadable")
+
+    monkeypatch.setattr(auth_mod, "read_credential_pool", _boom)
+    assert auth_kind("anthropic") == "api_key"
+    assert auth_kind("nous") == "oauth"  # catalog OAuth provider unaffected
+    assert relogin_command_hint("anthropic") == "hermes auth add anthropic"
+
+
+def test_pool_for_another_provider_is_ignored(monkeypatch):
+    """After a fallback switch the agent's pool can belong to a different provider."""
+    from agent.error_surface import active_credential
+
+    _stored_rows(monkeypatch, [])
+    assert active_credential("anthropic", _Pool("openrouter", "claude_code", "oauth")) is None
+    assert active_credential("anthropic", _Pool("anthropic", "claude_code", "oauth")) == ("claude_code", "oauth")
