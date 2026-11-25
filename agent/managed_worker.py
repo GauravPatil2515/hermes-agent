@@ -257,6 +257,11 @@ class WorkerControls:
         if self.agent is not None:
             from agent.interrupt_compat import request_hard_interrupt
             request_hard_interrupt(self.agent)  # parity with the canonical Stop (SessionAuthority.interrupt)
+        try:
+            from tools.async_delegation import interrupt_all
+            interrupt_all(reason="stop")
+        except Exception:
+            pass
         with self.lock:
             for state in self.clarifications.values():
                 state['answer'] = _INTERRUPTED
@@ -292,6 +297,11 @@ class WorkerControls:
             # The owner is gone (EOF/OSError) — before the hard-exit SIGKILLs this process group, give
             # in-flight background subagents a bounded chance to finish + persist a real result.
             if not isinstance(exc, ValueError):
+                try:
+                    from tools.async_delegation import interrupt_all
+                    interrupt_all(reason="owner exit")
+                except Exception:
+                    pass
                 _drain_background_delegations(DELEGATION_DRAIN_SECONDS)
             self.finish.set()
             if not isinstance(exc, ValueError):

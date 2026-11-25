@@ -984,6 +984,10 @@ class AIAgent(
         _quietly(cancel_prompt_cache_warming, self, "agent_close")
         self._close_task_resources(getattr(self, "session_id", None) or "")
         self._close_active_children(soft=False)
+        # Drain background delegations so in-flight subagents can finish + persist before process exit.
+        # This mirrors the drain in WorkerControls.read() exception handling (managed_worker.py:295).
+        from agent.managed_worker import _drain_background_delegations, DELEGATION_DRAIN_SECONDS
+        _quietly(_drain_background_delegations, DELEGATION_DRAIN_SECONDS)
         from agent.prepared_compaction import release_for_agent
         _quietly(release_for_agent, self)
         _quietly(self._drop_shared_client, lambda c: self._close_openai_client(c, reason="agent_close", shared=True))
